@@ -13,11 +13,11 @@ func (m *Manager) invalidateCacheLocked() error {
 	// LRU_PERCPU_HASH does not support batch operations well.
 	// Strategy: Iterate and delete all keys.
 	var key bpfCacheKey
-	var value bpfFwdInfo
+	var values []bpfFwdInfo // Slice for per-CPU values
 	var keysToDelete []bpfCacheKey
 
 	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, &value) {
+	for iter.Next(&key, &values) {
 		keysToDelete = append(keysToDelete, key)
 	}
 	if err := iter.Err(); err != nil {
@@ -130,9 +130,9 @@ func (m *Manager) GetCacheCount() (int, error) {
 
 	var count int
 	var key bpfCacheKey
-	var value bpfFwdInfo
+	var values []bpfFwdInfo // Slice for per-CPU values
 	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, &value) {
+	for iter.Next(&key, &values) {
 		count++
 	}
 	return count, iter.Err()
