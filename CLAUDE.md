@@ -5,15 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-make deps      # Install Go deps + bpf2go tool
-make generate  # Generate eBPF Go bindings from bpf/fib.c
-make build     # Build bin/fibctl (CGO_ENABLED=0)
-make dev       # Regenerate + rebuild (full dev cycle)
-make quick     # Build only (skip generate if BPF unchanged)
+make           # Full build: deps → generate → build (use on fresh checkout)
+make dev       # Regenerate + rebuild (after BPF changes)
+make quick     # Build only (after Go-only changes, BPF unchanged)
 make test      # Run all tests
 make fmt       # Format Go and BPF code
 make verify-bpf # Verify BPF code compiles
 ```
+
+Note: `make build` alone fails on fresh checkout because it requires generated BPF files. Use `make` or `make generate` first.
 
 ## Architecture
 
@@ -48,8 +48,8 @@ fibctl implements XDP-based IP forwarding with a two-level lookup:
 ### Code Generation
 
 `go generate` in internal/fib/ runs bpf2go to generate Go bindings from bpf/fib.c:
-- `internal/fib/bpf_bpfel.go` (little-endian)
-- `internal/fib/bpf_bpfeb.go` (big-endian)
+- `internal/fib/bpf_x86_bpfel.go` (amd64)
+- `internal/fib/bpf_arm64_bpfel.go` (arm64)
 
 ## Key Types (internal/fib/types.go)
 

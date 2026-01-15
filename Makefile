@@ -7,7 +7,7 @@ GOIMPORTS ?= /usr/bin/goimports
 # Build targets
 BIN := bin/fibctl
 BPF_SRC := bpf/fib.c
-BPF_GEN := internal/fib/bpf_bpfel.go internal/fib/bpf_bpfeb.go
+BPF_GEN := internal/fib/bpf_x86_bpfel.go internal/fib/bpf_arm64_bpfel.go
 
 .PHONY: all clean generate build test deps fmt install help
 
@@ -42,8 +42,7 @@ build: $(BPF_GEN)
 # Clean build artifacts
 clean:
 	rm -f $(BIN)
-	rm -f internal/fib/bpf_bpfel.go internal/fib/bpf_bpfeb.go
-	rm -f internal/fib/bpf_bpfel.o internal/fib/bpf_bpfeb.o
+	rm -f internal/fib/bpf_*_bpfel.go internal/fib/bpf_*_bpfel.o
 
 # Run tests
 test:
