@@ -1,6 +1,6 @@
 # fibctl - eBPF Cached FIB Lookup System
 
-An XDP-based IP forwarding system with per-CPU LRU caching, designed to evaluate superlinear scaling properties.
+An XDP-based IP forwarding system with per-CPU LRU caching, designed to evaluate cached FIB lookup scaling properties.
 
 ## Architecture
 
