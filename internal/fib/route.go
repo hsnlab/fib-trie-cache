@@ -237,8 +237,9 @@ func (m *Manager) GetRouteCount() (int, error) {
 
 	var count int
 	var key LpmKey
+	var value FwdInfo
 	iter := m.objs.FibTrie.Iterate()
-	for iter.Next(&key, nil) {
+	for iter.Next(&key, &value) {
 		count++
 	}
 	return count, iter.Err()

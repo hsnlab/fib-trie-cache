@@ -13,10 +13,11 @@ func (m *Manager) invalidateCacheLocked() error {
 	// LRU_PERCPU_HASH does not support batch operations well.
 	// Strategy: Iterate and delete all keys.
 	var key CacheKey
+	var value FwdInfo
 	var keysToDelete []CacheKey
 
 	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, nil) {
+	for iter.Next(&key, &value) {
 		keysToDelete = append(keysToDelete, key)
 	}
 	if err := iter.Err(); err != nil {
@@ -98,10 +99,11 @@ func (m *Manager) Reset() error {
 
 	// Clear FIB trie.
 	var key LpmKey
+	var value FwdInfo
 	var keysToDelete []LpmKey
 
 	iter := m.objs.FibTrie.Iterate()
-	for iter.Next(&key, nil) {
+	for iter.Next(&key, &value) {
 		keysToDelete = append(keysToDelete, key)
 	}
 	if err := iter.Err(); err != nil {
@@ -128,8 +130,9 @@ func (m *Manager) GetCacheCount() (int, error) {
 
 	var count int
 	var key CacheKey
+	var value FwdInfo
 	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, nil) {
+	for iter.Next(&key, &value) {
 		count++
 	}
 	return count, iter.Err()
