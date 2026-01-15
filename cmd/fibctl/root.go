@@ -15,8 +15,7 @@ var rootCmd = &cobra.Command{
 	Long: `fibctl manages an XDP-based FIB lookup system with per-CPU LRU caching.
 
 The system maintains a global LPM trie for FIB entries and per-CPU LRU caches
-for fast /32 lookups. This enables efficient IP forwarding with potentially
-superlinear scaling as CPUs/queues increase.`,
+for fast /32 lookups. This enables cahced IP forwarding for benchmarks.`,
 }
 
 func init() {
