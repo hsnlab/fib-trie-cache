@@ -124,18 +124,23 @@ func triggerARPResolution(ip net.IP, ifindex int) error {
 	return nil
 }
 
-// IPToU32 converts an IPv4 address to uint32 in network byte order.
+// IPToU32 converts an IPv4 address to uint32 for BPF maps.
+// The address is stored such that when written to BPF maps on little-endian
+// systems, the raw bytes appear in network order (big-endian).
 func IPToU32(ip net.IP) uint32 {
 	ip = ip.To4()
 	if ip == nil {
 		return 0
 	}
-	return binary.BigEndian.Uint32(ip)
+	// Use LittleEndian so that when cilium/ebpf writes this uint32 to the map
+	// (also as little-endian), the raw bytes match network byte order.
+	return binary.LittleEndian.Uint32(ip)
 }
 
-// U32ToIP converts a uint32 in network byte order to an IPv4 address.
+// U32ToIP converts a uint32 from BPF maps back to an IPv4 address.
+// This is the inverse of IPToU32.
 func U32ToIP(addr uint32) net.IP {
 	ip := make(net.IP, 4)
-	binary.BigEndian.PutUint32(ip, addr)
+	binary.LittleEndian.PutUint32(ip, addr)
 	return ip
 }
