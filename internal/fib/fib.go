@@ -77,7 +77,7 @@ func (m *Manager) Load() error {
 	}
 
 	// Initialize config with caching enabled by default.
-	cfg := Config{CacheEnabled: 1}
+	cfg := bpfConfig{CacheEnabled: 1}
 	if err := objs.ConfigMap.Update(uint32(0), cfg, ebpf.UpdateAny); err != nil {
 		objs.Close()
 		return fmt.Errorf("initializing config: %w", err)

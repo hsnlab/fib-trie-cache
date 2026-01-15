@@ -29,13 +29,13 @@ func (m *Manager) AddRoute(prefix net.IPNet, nextHop net.IP) error {
 
 	// Build LPM key.
 	ones, _ := prefix.Mask.Size()
-	key := LpmKey{
+	key := bpfLpmKey{
 		Prefixlen: uint32(ones),
 		Addr:      netutil.IPToU32(prefix.IP),
 	}
 
-	// Convert netutil.FwdInfo to our FwdInfo type.
-	fwdInfo := FwdInfo{
+	// Convert netutil.FwdInfo to BPF fwd_info type.
+	fwdInfo := bpfFwdInfo{
 		NextHop: fwd.NextHop,
 		Ifindex: fwd.Ifindex,
 	}
@@ -62,7 +62,7 @@ func (m *Manager) AddRoute(prefix net.IPNet, nextHop net.IP) error {
 
 // AddRouteWithInfo adds a route with pre-resolved forwarding info.
 // Useful for bulk imports where we want to batch ARP resolution.
-func (m *Manager) AddRouteWithInfo(prefix net.IPNet, fwdInfo FwdInfo) error {
+func (m *Manager) AddRouteWithInfo(prefix net.IPNet, fwdInfo bpfFwdInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,7 +72,7 @@ func (m *Manager) AddRouteWithInfo(prefix net.IPNet, fwdInfo FwdInfo) error {
 
 	// Build LPM key.
 	ones, _ := prefix.Mask.Size()
-	key := LpmKey{
+	key := bpfLpmKey{
 		Prefixlen: uint32(ones),
 		Addr:      netutil.IPToU32(prefix.IP),
 	}
@@ -100,7 +100,7 @@ func (m *Manager) RemoveRoute(prefix net.IPNet) error {
 	}
 
 	ones, _ := prefix.Mask.Size()
-	key := LpmKey{
+	key := bpfLpmKey{
 		Prefixlen: uint32(ones),
 		Addr:      netutil.IPToU32(prefix.IP),
 	}
@@ -196,12 +196,12 @@ func (m *Manager) ImportRoutes(filename string) (int, error) {
 	for _, r := range routes {
 		fwd := fwdInfos[r.nextHop]
 		ones, _ := r.prefix.Mask.Size()
-		key := LpmKey{
+		key := bpfLpmKey{
 			Prefixlen: uint32(ones),
 			Addr:      netutil.IPToU32(r.prefix.IP),
 		}
 
-		fwdInfo := FwdInfo{
+		fwdInfo := bpfFwdInfo{
 			NextHop: fwd.NextHop,
 			Ifindex: fwd.Ifindex,
 		}
@@ -236,8 +236,8 @@ func (m *Manager) GetRouteCount() (int, error) {
 	}
 
 	var count int
-	var key LpmKey
-	var value FwdInfo
+	var key bpfLpmKey
+	var value bpfFwdInfo
 	iter := m.objs.FibTrie.Iterate()
 	for iter.Next(&key, &value) {
 		count++

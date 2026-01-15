@@ -31,7 +31,7 @@ func (m *Manager) GetStats() (*AggregatedStats, error) {
 
 	// For PERCPU_ARRAY, we need to read all CPU values.
 	// The cilium/ebpf library handles this automatically.
-	var perCPUValues []Stats
+	var perCPUValues []bpfStats
 	if err := m.objs.StatsMap.Lookup(uint32(0), &perCPUValues); err != nil {
 		return nil, fmt.Errorf("looking up stats: %w", err)
 	}
@@ -52,7 +52,7 @@ func (m *Manager) GetStats() (*AggregatedStats, error) {
 }
 
 // GetPerCPUStats retrieves per-CPU statistics.
-func (m *Manager) GetPerCPUStats() ([]Stats, error) {
+func (m *Manager) GetPerCPUStats() ([]bpfStats, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -60,7 +60,7 @@ func (m *Manager) GetPerCPUStats() ([]Stats, error) {
 		return nil, fmt.Errorf("program not loaded")
 	}
 
-	var perCPUValues []Stats
+	var perCPUValues []bpfStats
 	if err := m.objs.StatsMap.Lookup(uint32(0), &perCPUValues); err != nil {
 		return nil, fmt.Errorf("looking up stats: %w", err)
 	}
@@ -82,7 +82,7 @@ func (m *Manager) resetStatsLocked() error {
 	}
 
 	// Create zeroed per-CPU values.
-	zeroStats := make([]Stats, numCPUs)
+	zeroStats := make([]bpfStats, numCPUs)
 
 	if err := m.objs.StatsMap.Update(uint32(0), zeroStats, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("resetting stats: %w", err)

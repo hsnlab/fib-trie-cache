@@ -12,9 +12,9 @@ import (
 func (m *Manager) invalidateCacheLocked() error {
 	// LRU_PERCPU_HASH does not support batch operations well.
 	// Strategy: Iterate and delete all keys.
-	var key CacheKey
-	var value FwdInfo
-	var keysToDelete []CacheKey
+	var key bpfCacheKey
+	var value bpfFwdInfo
+	var keysToDelete []bpfCacheKey
 
 	iter := m.objs.FibCache.Iterate()
 	for iter.Next(&key, &value) {
@@ -54,7 +54,7 @@ func (m *Manager) SetCacheEnabled(enabled bool) error {
 		return fmt.Errorf("program not loaded")
 	}
 
-	cfg := Config{CacheEnabled: 0}
+	cfg := bpfConfig{CacheEnabled: 0}
 	if enabled {
 		cfg.CacheEnabled = 1
 	}
@@ -75,7 +75,7 @@ func (m *Manager) IsCacheEnabled() (bool, error) {
 		return false, fmt.Errorf("program not loaded")
 	}
 
-	var cfg Config
+	var cfg bpfConfig
 	if err := m.objs.ConfigMap.Lookup(uint32(0), &cfg); err != nil {
 		return false, fmt.Errorf("looking up config: %w", err)
 	}
@@ -98,9 +98,9 @@ func (m *Manager) Reset() error {
 	}
 
 	// Clear FIB trie.
-	var key LpmKey
-	var value FwdInfo
-	var keysToDelete []LpmKey
+	var key bpfLpmKey
+	var value bpfFwdInfo
+	var keysToDelete []bpfLpmKey
 
 	iter := m.objs.FibTrie.Iterate()
 	for iter.Next(&key, &value) {
@@ -129,8 +129,8 @@ func (m *Manager) GetCacheCount() (int, error) {
 	}
 
 	var count int
-	var key CacheKey
-	var value FwdInfo
+	var key bpfCacheKey
+	var value bpfFwdInfo
 	iter := m.objs.FibCache.Iterate()
 	for iter.Next(&key, &value) {
 		count++
