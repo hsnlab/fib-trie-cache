@@ -52,6 +52,30 @@ func (m *Manager) Load() error {
 		return fmt.Errorf("loading BPF objects: %w", err)
 	}
 
+	// Pin maps to BPF filesystem for persistence.
+	// Note: ebpf.CollectionOptions.Maps.PinPath only specifies WHERE to pin,
+	// not THAT maps should be pinned. We must explicitly pin each map.
+	if err := objs.FibTrie.Pin(filepath.Join(m.pinPath, "fib_trie")); err != nil {
+		objs.Close()
+		return fmt.Errorf("pinning fib_trie: %w", err)
+	}
+	if err := objs.FibCache.Pin(filepath.Join(m.pinPath, "fib_cache")); err != nil {
+		objs.Close()
+		return fmt.Errorf("pinning fib_cache: %w", err)
+	}
+	if err := objs.StatsMap.Pin(filepath.Join(m.pinPath, "stats_map")); err != nil {
+		objs.Close()
+		return fmt.Errorf("pinning stats_map: %w", err)
+	}
+	if err := objs.ConfigMap.Pin(filepath.Join(m.pinPath, "config_map")); err != nil {
+		objs.Close()
+		return fmt.Errorf("pinning config_map: %w", err)
+	}
+	if err := objs.TxPorts.Pin(filepath.Join(m.pinPath, "tx_ports")); err != nil {
+		objs.Close()
+		return fmt.Errorf("pinning tx_ports: %w", err)
+	}
+
 	// Initialize config with caching enabled by default.
 	cfg := Config{CacheEnabled: 1}
 	if err := objs.ConfigMap.Update(uint32(0), cfg, ebpf.UpdateAny); err != nil {
