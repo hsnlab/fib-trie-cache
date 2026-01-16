@@ -141,7 +141,10 @@ int xdp_fib_lookup(struct xdp_md *ctx)
         struct cache_key ck = { .dst_ip = dst_ip };
         fwd = bpf_map_lookup_elem(&fib_cache, &ck);
 
-        if (fwd) {
+        // Validate cache entry: with LRU_PERCPU_HASH, each CPU has its own
+        // value. CPUs that haven't seen this flow will have zeroed entries
+        // (ifindex=0). Only use cache if entry is valid.
+        if (fwd && fwd->ifindex != 0) {
             s->cache_hits++;
             goto forward;
         }
