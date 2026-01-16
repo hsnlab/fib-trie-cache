@@ -6,33 +6,26 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-// invalidateCacheLocked clears all entries from the per-CPU LRU cache.
+// cacheSize must match CACHE_SIZE in bpf/fib.c.
+// This is used for cache invalidation (iterating all possible slots).
+const cacheSize = 65536
+
+// invalidateCacheLocked clears all entries from the per-CPU direct-mapped cache.
 // This is called after any trie modification to ensure consistency.
 // Caller must hold m.mu.
 func (m *Manager) invalidateCacheLocked() error {
-	// LRU_PERCPU_HASH does not support batch operations well.
-	// Strategy: Iterate and delete all keys.
-	var key bpfCacheKey
-	var values []bpfFwdInfo // Slice for per-CPU values
-	var keysToDelete []bpfCacheKey
-
-	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, &values) {
-		keysToDelete = append(keysToDelete, key)
-	}
-	if err := iter.Err(); err != nil {
-		return fmt.Errorf("iterating cache: %w", err)
-	}
-
-	for _, k := range keysToDelete {
-		// Ignore errors - key may have been evicted by LRU.
-		_ = m.objs.FibCache.Delete(k)
+	// Direct-mapped cache: iterate all possible slot indices and delete.
+	// This is O(cacheSize) regardless of actual entries, but ensures
+	// complete invalidation.
+	for slot := uint32(0); slot < cacheSize; slot++ {
+		// Ignore errors - slot may be empty.
+		_ = m.objs.FibCache.Delete(slot)
 	}
 
 	return nil
 }
 
-// InvalidateCache clears all entries from the per-CPU LRU cache.
+// InvalidateCache clears all entries from the per-CPU direct-mapped cache.
 // Thread-safe version for external callers.
 func (m *Manager) InvalidateCache() error {
 	m.mu.Lock()
@@ -119,7 +112,7 @@ func (m *Manager) Reset() error {
 }
 
 // GetCacheCount returns the approximate number of entries in the cache.
-// Note: For LRU_PERCPU_HASH, this iterates all keys which may be slow.
+// Note: For direct-mapped PERCPU_HASH, this iterates all keys which may be slow.
 func (m *Manager) GetCacheCount() (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,10 +122,10 @@ func (m *Manager) GetCacheCount() (int, error) {
 	}
 
 	var count int
-	var key bpfCacheKey
-	var values []bpfFwdInfo // Slice for per-CPU values
+	var slot uint32
+	var values []bpfCacheEntry // Slice for per-CPU values
 	iter := m.objs.FibCache.Iterate()
-	for iter.Next(&key, &values) {
+	for iter.Next(&slot, &values) {
 		count++
 	}
 	return count, iter.Err()

@@ -1,6 +1,6 @@
 # fibctl - eBPF Cached FIB Lookup System
 
-An XDP-based IP forwarding system with per-CPU LRU caching, designed to evaluate cached FIB lookup scaling properties.
+An XDP-based IP forwarding system with per-CPU direct-mapped caching, designed to evaluate cached FIB lookup scaling properties.
 
 ## Architecture
 
@@ -8,13 +8,13 @@ An XDP-based IP forwarding system with per-CPU LRU caching, designed to evaluate
                          XDP Program (per-packet)
 ┌────────────────────────────────────────────────────────────────┐
 │  1. Parse IPv4 dst_ip                                          │
-│  2. Lookup per-CPU LRU cache (/32)  ──hit──►  forward          │
-│            │ miss                                              │
+│  2. Lookup per-CPU direct-mapped cache (/32)  ──hit──► forward │
+│            │ miss (slot empty or different dst_ip)             │
 │            ▼                                                   │
 │  3. Lookup global LPM trie (prefixes)                          │
 │            │                                                   │
 │            ▼                                                   │
-│  4. Cache result, rewrite MACs, XDP_REDIRECT                   │
+│  4. Cache result (overwrite slot), rewrite MACs, XDP_REDIRECT  │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -168,8 +168,11 @@ Default values (compile-time, in `bpf/fib.c`):
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `fib_trie.max_entries` | 10M | Max routes in LPM trie |
-| `fib_cache.max_entries` | 64K | Cache entries per CPU |
+| `CACHE_SIZE` | 64K | Direct-mapped cache slots per CPU |
 | `tx_ports.max_entries` | 256 | Max redirect interfaces |
+
+To change `CACHE_SIZE`, edit the `-DCACHE_SIZE=65536` value in `internal/fib/types.go`
+and update the `cacheSize` constant in `internal/fib/cache.go` to match.
 
 BPF pin path: `/sys/fs/bpf/fibctl` (override with `-p`)
 
@@ -180,10 +183,21 @@ BPF pin path: `/sys/fs/bpf/fibctl` (override with `-p`)
 | Map | Type | Purpose |
 |-----|------|---------|
 | `fib_trie` | LPM_TRIE | Global FIB (longest prefix match) |
-| `fib_cache` | LRU_PERCPU_HASH | Per-CPU /32 cache |
+| `fib_cache` | PERCPU_HASH | Per-CPU direct-mapped /32 cache |
 | `stats_map` | PERCPU_ARRAY | Per-CPU counters |
 | `config_map` | ARRAY | Runtime config (cache enable/disable) |
 | `tx_ports` | DEVMAP | Redirect target interfaces |
+
+### Cache Design
+
+The cache uses a **direct-mapped** design with `PERCPU_HASH`:
+- **Key**: Slot index computed as `dst_ip % CACHE_SIZE`
+- **Value**: `cache_entry` containing `dst_ip` (for collision detection) + forwarding info
+- **Hit**: Slot exists AND stored `dst_ip` matches packet's `dst_ip`
+- **Miss**: Empty slot OR `dst_ip` mismatch → LPM trie lookup → overwrite slot
+
+This is simpler than LRU (no eviction tracking overhead) but susceptible to cache pollution
+from IP collisions. Works well when traffic has good locality.
 
 ### Next-Hop Resolution
 
@@ -194,7 +208,9 @@ When adding routes, `fibctl` automatically resolves:
 
 ### Cache Invalidation
 
-Any trie modification (add/remove/import) invalidates the entire cache to ensure consistency (LPM changes can affect any cached /32).
+Any trie modification (add/remove/import) invalidates the entire cache to ensure consistency
+(LPM changes can affect any cached /32). Invalidation iterates all `CACHE_SIZE` slots and
+deletes them.
 
 ## License
 

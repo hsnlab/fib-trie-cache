@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 // XDP-based cached FIB lookup program.
-// Maintains a global LPM trie for FIB entries and per-CPU LRU caches
-// for fast /32 lookups.
+// Maintains a global LPM trie for FIB entries and per-CPU direct-mapped
+// caches for fast /32 lookups.
+
+// Compile-time configurable cache size (slots per CPU).
+#ifndef CACHE_SIZE
+#define CACHE_SIZE 65536  // Default 64K slots.
+#endif
 
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
@@ -16,7 +21,7 @@ struct lpm_key {
     __u32 addr;       // IPv4 address in network byte order.
 };
 
-// Forwarding information stored in both trie and cache.
+// Forwarding information stored in trie.
 struct fwd_info {
     __u32 next_hop;           // Next-hop IPv4 address (network order).
     __u32 ifindex;            // Output interface index.
@@ -24,9 +29,13 @@ struct fwd_info {
     __u8  dst_mac[ETH_ALEN];  // Destination MAC (next-hop MAC).
 };
 
-// Cache key: just the destination IP (/32 lookup).
-struct cache_key {
-    __u32 dst_ip;  // Destination IP in network byte order.
+// Cache entry: dst_ip embedded for collision detection in direct-mapped cache.
+struct cache_entry {
+    __u32 dst_ip;             // Original dst IP (for hit validation).
+    __u32 next_hop;           // Next-hop IPv4 address (network order).
+    __u32 ifindex;            // Output interface index.
+    __u8  src_mac[ETH_ALEN];  // Source MAC (interface MAC).
+    __u8  dst_mac[ETH_ALEN];  // Destination MAC (next-hop MAC).
 };
 
 // Per-CPU statistics counters.
@@ -53,13 +62,14 @@ struct {
     __uint(max_entries, 10000000);  // 10M routes.
 } fib_trie SEC(".maps");
 
-// Per-CPU LRU cache for /32 lookups.
-// Provides fast path for repeated destination IPs.
+// Direct-mapped per-CPU cache for /32 lookups.
+// Key = slot index (dst_ip % CACHE_SIZE).
+// Value = cache_entry with embedded dst_ip for hit validation.
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
-    __type(key, struct cache_key);
-    __type(value, struct fwd_info);
-    __uint(max_entries, 65536);  // 64K entries per CPU.
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, __u32);                    // Slot index.
+    __type(value, struct cache_entry);
+    __uint(max_entries, CACHE_SIZE);
 } fib_cache SEC(".maps");
 
 // Per-CPU statistics array.
@@ -86,6 +96,13 @@ struct {
     __type(value, __u32);
     __uint(max_entries, 256);  // Max interfaces to redirect to.
 } tx_ports SEC(".maps");
+
+// Direct-mapped cache slot calculation.
+// Simple modulo hash - works well for typical IP address distributions.
+static __always_inline __u32 cache_slot(__u32 dst_ip)
+{
+    return dst_ip % CACHE_SIZE;
+}
 
 // Update IP header checksum incrementally after TTL decrement.
 static __always_inline void update_ip_checksum(struct iphdr *ip)
@@ -133,19 +150,26 @@ int xdp_fib_lookup(struct xdp_md *ctx)
     if (!cfg)
         return XDP_PASS;
 
-    struct fwd_info *fwd = NULL;
     __u32 dst_ip = ip->daddr;
 
-    // Step 1: Check per-CPU cache if enabled.
-    if (cfg->cache_enabled) {
-        struct cache_key ck = { .dst_ip = dst_ip };
-        fwd = bpf_map_lookup_elem(&fib_cache, &ck);
+    // Local fwd_info for cache hit path (copied from cache_entry).
+    struct fwd_info fwd_local;
+    struct fwd_info *fwd = NULL;
 
-        // Validate cache entry: with LRU_PERCPU_HASH, each CPU has its own
-        // value. CPUs that haven't seen this flow will have zeroed entries
-        // (ifindex=0). Only use cache if entry is valid.
-        if (fwd && fwd->ifindex != 0) {
+    // Step 1: Check per-CPU direct-mapped cache if enabled.
+    if (cfg->cache_enabled) {
+        __u32 slot = cache_slot(dst_ip);
+        struct cache_entry *ce = bpf_map_lookup_elem(&fib_cache, &slot);
+
+        // Hit: slot exists AND dst_ip matches AND entry is valid.
+        if (ce && ce->dst_ip == dst_ip && ce->ifindex != 0) {
             s->cache_hits++;
+            // Copy cache_entry to local fwd_info for forward path.
+            fwd_local.next_hop = ce->next_hop;
+            fwd_local.ifindex = ce->ifindex;
+            __builtin_memcpy(fwd_local.src_mac, ce->src_mac, ETH_ALEN);
+            __builtin_memcpy(fwd_local.dst_mac, ce->dst_mac, ETH_ALEN);
+            fwd = &fwd_local;
             goto forward;
         }
         s->cache_miss++;
@@ -164,20 +188,20 @@ int xdp_fib_lookup(struct xdp_md *ctx)
     }
 
     // Step 3: Cache the result if caching is enabled.
+    // Direct-mapped: unconditionally overwrite the slot (evicts any previous entry).
     if (cfg->cache_enabled) {
-        struct cache_key ck = { .dst_ip = dst_ip };
-        // LRU_PERCPU_HASH auto-evicts oldest entries when full.
-        bpf_map_update_elem(&fib_cache, &ck, fwd, BPF_ANY);
-        // Re-lookup to get a valid pointer after update.
-        fwd = bpf_map_lookup_elem(&fib_cache, &ck);
-        if (!fwd) {
-            // Fallback: re-lookup from trie.
-            fwd = bpf_map_lookup_elem(&fib_trie, &lk);
-            if (!fwd) {
-                s->fwd_fail++;
-                return XDP_PASS;
-            }
-        }
+        __u32 slot = cache_slot(dst_ip);
+        struct cache_entry ce = {
+            .dst_ip = dst_ip,
+            .next_hop = fwd->next_hop,
+            .ifindex = fwd->ifindex,
+        };
+        __builtin_memcpy(ce.src_mac, fwd->src_mac, ETH_ALEN);
+        __builtin_memcpy(ce.dst_mac, fwd->dst_mac, ETH_ALEN);
+
+        // Overwrite slot (direct-mapped eviction policy).
+        bpf_map_update_elem(&fib_cache, &slot, &ce, BPF_ANY);
+        // fwd still points to valid trie entry, no re-lookup needed.
     }
 
 forward:

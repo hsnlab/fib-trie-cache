@@ -4,6 +4,9 @@ CLANG ?= clang
 GO ?= go
 GOIMPORTS ?= /usr/bin/goimports
 
+# Cache size (slots per CPU). Must match CACHE_SIZE in internal/fib/types.go go:generate directive.
+CACHE_SIZE ?= 65536
+
 # Build targets
 BIN := bin/fibctl
 BPF_SRC := bpf/fib.c
@@ -25,6 +28,10 @@ help:
 	@echo "  test      - Run tests"
 	@echo "  fmt       - Format Go and BPF code"
 	@echo "  install   - Install fibctl to /usr/local/bin"
+	@echo ""
+	@echo "Configuration:"
+	@echo "  CACHE_SIZE - Direct-mapped cache slots per CPU (default: $(CACHE_SIZE))"
+	@echo "               To change, edit -DCACHE_SIZE in internal/fib/types.go"
 
 # Install dependencies
 deps:
